@@ -1,41 +1,90 @@
-import logging
+"""
+Github Webhook receiver
+"""
+
 import os
 import time
 from github_webhook import Webhook
-from flask import Flask, Response, request, abort
-from prometheus_client import Histogram, Counter, Summary, Gauge, REGISTRY, generate_latest
+from flask import Flask, request
+from prometheus_client import Histogram, Counter, Gauge, REGISTRY
+from prometheus_client import generate_latest
 
-app = Flask(__name__) # Standard Flask app
-webhook = Webhook(app) # Defines '/postreceive' endpoint
-FLASK_REQUEST_LATENCY = Histogram('flask_request_latency_seconds', 'Flask Request Latency', ['method', 'endpoint'])
-FLASK_REQUEST_COUNT = Counter('flask_request_count', 'Flask Request Count', ['method', 'endpoint', 'http_status'])
-FLASK_REQUEST_SIZE = Gauge('flask_request_size_bytes', 'Flask Response Size', ['method', 'endpoint', 'http_status'])
+APP = Flask(__name__)  # Standard Flask app
+WEBHOOK = Webhook(APP)  # Defines '/postreceive' endpoint
 
-lastpush = {}
+FLASK_REQUEST_LATENCY = Histogram(
+    'flask_request_latency_seconds',
+    'Flask Request Latency',
+    ['method', 'endpoint']
+)
 
-@app.route("/")
+FLASK_REQUEST_COUNT = Counter(
+    'flask_request_count',
+    'Flask Request Count',
+    ['method', 'endpoint', 'http_status']
+)
+
+FLASK_REQUEST_SIZE = Gauge(
+    'flask_request_size_bytes',
+    'Flask Response Size',
+    ['method', 'endpoint', 'http_status']
+)
+
+APP.lastpush = {}
+
+
+@APP.route("/")
 def hello():
-    return "Hello<br>last push: {0}".format(lastpush)
+    """
+    Default root route for my testing
+    """
+    return "Hello<br>last push: {0}".format(APP.lastpush)
 
-@webhook.hook()
+
+@WEBHOOK.hook()
 def on_push(data):
-    lastpush = data
+    """
+    Route that gets triggered through github
+    """
+    APP.lastpush = data
 
-@app.route('/metrics')
+
+@APP.route('/metrics')
 def metrics():
+    """
+    Route returning metrics to prometheus
+    """
     return generate_latest(REGISTRY)
 
+
 def before_request():
+    """
+    annotate the processing start time to each flask request
+    """
     request.start_time = time.time()
 
+
 def after_request(response):
-    request_latency = max(time.time() - request.start_time, 0) # time can go backwards...
-    FLASK_REQUEST_LATENCY.labels(request.method, request.path).observe(request_latency)
-    FLASK_REQUEST_SIZE.labels(request.method, request.path, response.status_code).set(len(response.data))
-    FLASK_REQUEST_COUNT.labels(request.method, request.path, response.status_code).inc()
+    """
+    after returning the request calculate metrics about this request
+    """
+    # time can go backwards...
+    request_latency = max(time.time() - request.start_time, 0)
+    # pylint: disable-msg=no-member
+    FLASK_REQUEST_LATENCY.labels(request.method, request.path)\
+                         .observe(request_latency)
+    FLASK_REQUEST_SIZE.labels(request.method,
+                              request.path,
+                              response.status_code)\
+                      .set(len(response.data))
+    FLASK_REQUEST_COUNT.labels(request.method,
+                               request.path,
+                               response.status_code)\
+                       .inc()
     return response
 
+
 if __name__ == "__main__":
-    app.before_request(before_request)
-    app.after_request(after_request)
-    app.run(host='0.0.0.0',port=os.environ.get('listenport', 8080))
+    APP.before_request(before_request)
+    APP.after_request(after_request)
+    APP.run(host='0.0.0.0', port=os.environ.get('listenport', 8080))
