@@ -2,6 +2,7 @@
 Github Webhook receiver
 """
 
+import logging
 import os
 import time
 from github_webhook import Webhook
@@ -31,6 +32,8 @@ FLASK_REQUEST_SIZE = Gauge(
 )
 
 APP.lastpush = {}
+LOGFORMAT = '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+logging.basicConfig(level=logging.DEBUG, format=LOGFORMAT)
 
 
 @APP.route("/")
@@ -47,6 +50,7 @@ def on_push(data):
     Route that gets triggered through github
     """
     APP.lastpush = data
+    logging.debug(data)
 
 
 @APP.route('/metrics')
